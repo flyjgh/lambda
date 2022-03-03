@@ -1,40 +1,11 @@
-import Base: *, ^, +, /, ÷, ⊻, !, ==, show, convert, Int, Bool
+import Base: *, ^, +, ⊻, !, ==, show, convert, Int, Bool
+
 # ----------------------------------------------------------------
 # Kernel
-# φ(α,β) = eval(α)(eval(β))
-# φ(α)   = foldl(φ, α)
-
-# macro φ(α...) φ(α) end
-
-# ----------------------------------------------------------------
-# Eval
-# evalo = α -> quote($a).head == :(=) ? eval(α)
-
-φ(α,β)       = eval(α)(eval(β))
-φ(α,β::Expr) = φ(α, φ(atom.(β.args)))
-φ(α)         = foldl(φ, atom.(α))
+φ(α,β) = eval(α)(eval(β))
+φ(α)   = foldl(φ, α)
 
 macro φ(α...) φ(α) end
-
-
-atom(x) = x
-atom(x::Int) = ℕ(x)
-atom(x::Bool) = Boolean(x)
-atom(x::Function) = :($x)
-
-tail(x::Vector{T}) where T = x[2:end]
-
-function atom(expr::Expr)
-    expr.head === :tuple && return φ(atom.(expr.args))
-    expr.head === :call  && return Expr(:call, atom(first(expr.args)), (atom.(tail(expr.args))...))
-    expr.head === :block && return Expr(:block, atom.(expr.args)...)
-    expr.head === :->    && return Expr(:->, first(expr.args), atom.(tail(expr.args))...)
-    expr.head === :if    && return Expr(ifelse(atom(expr.args[1])(atom(expr.args[2]))(atom(expr.args[3]))))
-    expr.head === :(&&)  && return Expr(iff(atom(expr.args[1]))(atom(expr.args[2])))
-    expr.head === :(||)  && return Expr(orr(atom(expr.args[1]))(atom(expr.args[2])))
-    expr.head === :(=)   && return Expr(:(=), first(expr.args), var(atom(expr.args[2])))
-    return expr
-end
 
 # ----------------------------------------------------------------
 # Combinators
@@ -50,135 +21,93 @@ const ω = (S)(I)(I)                        # γ -> I(γ)(I(γ)) === γ -> γ(γ
 const Y = ƒ->(α->(ƒ)(α)(α))(α->(ƒ)(α)(α))  # : loop
 
 # ----------------------------------------------------------------
-# Nat struct
-struct ℕ{T} λ end
-
-(ƒ::ℕ)(α) = ƒ.λ(α)
-
-ℕ(ƒ) = ℕ{Int(ƒ)}(ƒ)
-ℕ(n::Int,ƒ=zero) = n < 1 ? ℕ{Int(ƒ)}(ƒ) : ℕ(n-1, (succ)(ƒ))
-
-Base.show(io::IO, ::ℕ{T}) where T = println(io, "$T :: ℕ")
-
-# ----------------------------------------------------------------
 # Nat
-const zero = (K)(I) |> ℕ
+const zero = (K)(I)
 const succ = n -> γ -> γ ∘ n(γ)
 
-∑(α) = β -> (α)(succ)(β) |> ℕ
-∏(α) = β -> (α ∘ β) |> ℕ
-^(α) = β -> (β)(α) |> ℕ
++(α) = β -> (α)(succ)(β)
+*(α) = β -> (α ∘ β)
+^(α) = β -> (β)(α)
 
-# ----------------------------------------------------------------
-# Bool struct
-struct Boolean{T} λ end
+int = n -> (n)(α -> α+1)(0)
 
-(ƒ::Boolean)(α) = ƒ.λ(α)
-
-Boolean(ƒ) = Boolean{Bool(ƒ)}(ƒ)
-Boolean(b::Bool) = b ? tt : ff
-
-Base.show(io::IO, ::Boolean{T}) where T = println(io, "$T :: Boolean")
+nat(n,m) = n == 0 ? m : nat(n-1, succ(m))
+# (n::Int)(x) = nat(n,zero)(x)
 
 # ----------------------------------------------------------------
 # Bool
-const tt = (K) |> Boolean
-const ff = (K)(I) |> Boolean
+const tt = (K)
+const ff = (K)(I)
 
-!(α)  = (α)(ff)(tt) |> Boolean
-eq(α) = β -> (α)(β)((!)(β)) |> Boolean
-==(α) = β -> (α)(β)((!)(β)) |> Boolean
-∧(α)  = β -> (α)(β)(α) |> Boolean
-∨(α)  = β -> (α)(α)(β) |> Boolean
-⊻(α)  = β -> (α)((!)(β))(β) |> Boolean
+!(α)  = (α)(ff)(tt)
+eq(α) = β -> (α)(β)((!)(β))
+==(α) = β -> (α)(β)((!)(β))
+∧(α)  = β -> (α)(β)(α)
+∨(α)  = β -> (α)(α)(β)
+⊻(α)  = β -> (α)((!)(β))(β)
+
+bool = ƒ -> (ƒ)(true)(false)
+# (b::Bool)() = b ? tt : ff
 
 # ----------------------------------------------------------------
 # Control Flow
-iff(::Boolean{T}) where T = β -> T && β
-iff(α) = β -> Bool(α) && β
-orr(::Boolean{T}) where T = β -> T || β
-orr(α) = β -> Bool(α) || β
 const ifelse = α -> β -> γ -> (α)(β)(γ)
 
 # ----------------------------------------------------------------
-# Var
+# Variables
 var(α) = β -> (β)(α)
 
 # ----------------------------------------------------------------
-# Pair struct
-struct ×{T,N} λ end
-
-(ƒ::×)(α) = ƒ.λ(α)
-
-×(α) = β -> γ -> ×{typeof(α),typeof(β)}((γ)(α)(β))
-
-Base.show(io::IO, ::×{T,N}) where {T,N} = println(io, "$T × $N :: ×")
-
-# ----------------------------------------------------------------
 # Pair
-# ×(α) = β -> γ -> (γ)(α)(β)
+×(α) = β -> γ -> (γ)(α)(β)
 
 const nil = (K)
 const fst = (K)
 const snd = (K)(I)
 
+pair = ρ -> (fst(ρ),snd(ρ))
+
+unit(α) = α × ()
+×(iterable::α) where α = foldr(×, iterable)
+
+# ----------------------------------------------------------------
+# Type Algebra
++(α::Type) = β::Type -> Union{α,β}
+*(α::Type) = β::Type -> Tuple{α,β}
+
 # ----------------------------------------------------------------
 # Arity
-==(α,β) = (==)(β)(α)
-^(α,β) = ^(β)(α)
-∧(α,β) = ∧(α)(β)
-∨(α,β) = ∨(α)(β)
-⊻(α,β) = ⊻(α)(β) 
-×(α,β) = ×(α)(β) 
+# (==)(α,β) = (==)(β)(α)
+∧(α,β) = ∧(bool(α))(bool(β))
+∨(α,β) = ∨(bool(α))(bool(β))
+⊻(α,β) = ⊻(bool(α))(bool(β))
+
+×(α,β) = ×(α)(β)
+
+(+)(α,β) = (+)(nat(α))(nat(β))
+(*)(α,β) = (*)(nat(α))(nat(β))
+(^)(α,β) = (^)(nat(α))(nat(β))
 
 # ----------------------------------------------------------------
-# Converters
-Int(::ℕ{T}) where T = T
-Int(n::T) where T = (n)(α -> α+1)(0)
+5()
+5() + 6()
 
-Bool(::Boolean{T}) where T = T
-Bool(b::T) where T = (b)(true)(false)
-Bool(e::Expr) = φ(e)
-
-ℕ(::Boolean{T}) where T = !T ? zero : error("::Boolean{T} cannot be converted to ::ℕ if T != false")
-Boolean(::ℕ{T}) where T = T == 0 ? ff : error("::ℕ{T} cannot be converted to ::Boolean if T != 0")
-
-# ----------------------------------------------------------------
-# (*)(n,ƒ) = ƒ(n)
-# (^)(ƒ,n) = ∘(repeat([ƒ], n)...)
-
-# (+)(α::T) where T <: Number = β -> α + +(β)
-# (-)(α::T) where T <: Number = β -> α - -(β)
-# (*)(α::T) where T <: Number = β -> α - -(β)
-# (/)(α::T) where T <: Number = β -> α / /(β)
-# (^)(α::T) where T <: Number = β -> α ^ ^(β)
-# (÷)(α::T) where T <: Number = β -> α ÷ ÷(β)
-
-# (+)(α,β) = (+)(α)(β)
-# (-)(α,β) = (-)(α)(β)
-# (*)(α,β) = (*)(α)(β)
-# (/)(α,β) = (/)(α)(β)
-# (^)(α,β) = (^)(α)(β)
-# (÷)(α,β) = (÷)(α)(β)
-
-# ----------------------------------------------------------------
-
-f = x -> y -> ∑(x)(y)
-g = w -> x -> y -> z -> ∑(x)(y) |> ∑(z) |> ∑(w)
+f = x -> y -> +(x)(y)
+g = w -> x -> y -> z -> +(x)(y) |> +(z) |> +(w)
 x, y, z = 3, 4, 5
 
 debug = x -> println(♯(x))
-@φ debug (∑, 10, 15)
+@φ debug (+, 10, 15)
 
-@φ ∑ (∏, 5, (∑, (∑, 2, 0), 3)) 0
-@φ ∑ 10 15
+@φ + (∏, 5, (+, (+, 2, 0), 3)) 0
+@φ + 10 15
 @φ g 2 3 4 2
-@φ ∑ (∑(2) ∘ ∑(2), 2) (∑(2) ∘ ∑(2), 2)
-@φ ((∑, 2) ∘ (∑, 2)) 10
+@φ + (+(2) ∘ +(2), 2) (+(2) ∘ +(2), 2)
+@φ ((+, 2) ∘ (+, 2)) 10
 # @φ g 2 3 y 2
 
 # @φ (x -> x) (∏, 10, 2)
-# (@φ (x,y) -> ∑(2))(ℕ(2))
+# (@φ (x,y) -> +(2))(ℕ(2))
 # @φ exp (x -> 2int(x), (∏, 10, 2))
 
 @φ log (exp, Int(10))
